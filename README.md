@@ -1,5 +1,9 @@
 # IOC Enrichment Tool
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
 A Python IOC enrichment project with:
 
 - CLI workflow for bulk or single IOC analysis
@@ -32,7 +36,7 @@ A Python IOC enrichment project with:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install requests python-dotenv streamlit pandas
+pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -66,6 +70,12 @@ streamlit run ioc_enricher_ui.py
 ```
 
 Then open the local URL shown by Streamlit (usually `http://localhost:8501`).
+
+## Screenshot
+
+Add a UI screenshot to `images/ui-overview.png` and GitHub will render it here:
+
+![IOC Enricher UI](images/ui-overview.png)
 
 ## Security Note
 
