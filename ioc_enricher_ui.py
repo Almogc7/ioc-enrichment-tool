@@ -58,17 +58,24 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
         vt  = r["sources"].get("virustotal",    {})
         ab  = r["sources"].get("abuseipdb",     {})
         otx = r["sources"].get("alienvault_otx", {})
+        score_breakdown = r.get("score_breakdown", {})
 
         try:
             ts = r["checked_at"][:19].replace("T", " ") + " UTC"
         except Exception:
             ts = r["checked_at"]
 
+        why_flagged = ", ".join(
+            f"{component['label']} +{component['contribution']}"
+            for component in score_breakdown.get("components", [])[:3]
+        ) or "No strong scoring signals"
+
         return {
             "IOC":           r["value"],
             "Type":          r["ioc_type"].upper(),
             "Risk Score":    r["risk_score"],
             "Verdict":       r["verdict"],
+            "Why Flagged":   why_flagged,
             "VT Malicious":  vt.get("malicious",  "–") if vt.get("enabled") else "–",
             "VT Suspicious": vt.get("suspicious", "–") if vt.get("enabled") else "–",
             "Abuse Score":   ab.get("abuse_confidence_score", "–") if ab.get("enabled") else "–",
@@ -165,6 +172,7 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
         vt  = r["sources"].get("virustotal",    {})
         ab  = r["sources"].get("abuseipdb",     {})
         otx = r["sources"].get("alienvault_otx", {})
+        score_breakdown = r.get("score_breakdown", {})
         score   = r["risk_score"]
         verdict = r["verdict"]
 
@@ -189,6 +197,14 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
                 st.metric("Risk Score", f"{score} / 100")
 
             st.progress(score / 100)
+
+            if score_breakdown.get("components"):
+                st.markdown("**Why flagged**")
+                for component in score_breakdown["components"]:
+                    st.markdown(
+                        f"- {component['label']}: +{component['contribution']} (raw value: {component['raw_value']})"
+                    )
+
             st.divider()
 
             sc1, sc2, sc3 = st.columns(3)
@@ -196,8 +212,9 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
             # ── VirusTotal ────────────────────────────────────────────────────
             with sc1:
                 st.markdown("**🔬 VirusTotal**")
+                st.caption(f"Status: {vt.get('status', 'unknown').replace('_', ' ')}")
                 if not vt.get("enabled"):
-                    st.caption("API key not configured.")
+                    st.caption(vt.get("error", "API key not configured."))
                 elif vt.get("error"):
                     st.warning(f"Error: {vt['error']}")
                 else:
@@ -217,11 +234,9 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
             # ── AbuseIPDB ─────────────────────────────────────────────────────
             with sc2:
                 st.markdown("**🚨 AbuseIPDB**")
+                st.caption(f"Status: {ab.get('status', 'unknown').replace('_', ' ')}")
                 if not ab.get("enabled"):
-                    if r["ioc_type"] != "ip":
-                        st.caption("Not applicable (not an IP address).")
-                    else:
-                        st.caption("API key not configured.")
+                    st.caption(ab.get("error", "API key not configured."))
                 elif ab.get("error"):
                     st.warning(f"Error: {ab['error']}")
                 else:
@@ -239,8 +254,9 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
             # ── AlienVault OTX ────────────────────────────────────────────────
             with sc3:
                 st.markdown("**📡 AlienVault OTX**")
+                st.caption(f"Status: {otx.get('status', 'unknown').replace('_', ' ')}")
                 if not otx.get("enabled"):
-                    st.caption("API key not configured.")
+                    st.caption(otx.get("error", "API key not configured."))
                 elif otx.get("error"):
                     st.warning(f"Error: {otx['error']}")
                 else:
