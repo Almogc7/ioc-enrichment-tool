@@ -1,6 +1,9 @@
-import streamlit as st
+import json
+
 import pandas as pd
-from IOC_Enricher import IOCEnricher, asdict
+import streamlit as st
+
+from IOC_Enricher import IOCEnricher, MAX_BATCH_SIZE, asdict, prepare_iocs
 
 st.set_page_config(page_title="IOC Enricher", layout="wide", page_icon="🔍")
 
@@ -38,16 +41,27 @@ if ioc_input:
     iocs.extend([line.strip() for line in ioc_input.splitlines() if line.strip()])
 if uploaded_file:
     iocs.extend([line.decode("utf-8").strip() for line in uploaded_file.readlines() if line.strip()])
-iocs = list(dict.fromkeys(iocs))  # deduplicate, preserve order
+prepared_iocs = prepare_iocs(iocs)
+
+if prepared_iocs.duplicates_removed:
+    st.info(f"Removed {prepared_iocs.duplicates_removed} duplicate IOC(s) before enrichment.")
+if prepared_iocs.truncated_count:
+    st.warning(
+        f"Batch limited to {prepared_iocs.max_batch_size} IOC(s). {prepared_iocs.truncated_count} IOC(s) were not processed."
+    )
+if prepared_iocs.invalid_iocs:
+    with st.expander(f"Review invalid IOC entries ({len(prepared_iocs.invalid_iocs)})"):
+        st.write(prepared_iocs.invalid_iocs)
+st.caption(f"Current batch guardrail: maximum {MAX_BATCH_SIZE} valid IOC(s) per run.")
 
 if st.button("Enrich IOCs", type="primary", key="enrich_iocs_button"):
-    if iocs:
+    if prepared_iocs.valid_iocs:
         enricher = IOCEnricher()
-        with st.spinner(f"Enriching {len(iocs)} IOC(s) — this may take a moment..."):
-            results = [asdict(enricher.enrich_one(ioc)) for ioc in iocs]
+        with st.spinner(f"Enriching {len(prepared_iocs.valid_iocs)} IOC(s) — this may take a moment..."):
+            results = [asdict(result) for result in enricher.enrich_many(prepared_iocs.valid_iocs)]
         st.session_state["ioc_results"] = results
     else:
-        st.warning("Please enter or upload at least one IOC.")
+        st.warning("Please enter or upload at least one valid IOC.")
 
 # ── Results ───────────────────────────────────────────────────────────────────
 if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
@@ -76,6 +90,7 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
             "Risk Score":    r["risk_score"],
             "Verdict":       r["verdict"],
             "Why Flagged":   why_flagged,
+            "From Cache":    "Yes" if r.get("cache_hit") else "No",
             "VT Malicious":  vt.get("malicious",  "–") if vt.get("enabled") else "–",
             "VT Suspicious": vt.get("suspicious", "–") if vt.get("enabled") else "–",
             "Abuse Score":   ab.get("abuse_confidence_score", "–") if ab.get("enabled") else "–",
@@ -96,6 +111,10 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
     c2.metric("High Risk",      int((df_raw["risk_score"] >= 70).sum()))
     c3.metric("Suspicious",     int(((df_raw["risk_score"] >= 40) & (df_raw["risk_score"] < 70)).sum()))
     c4.metric("Avg Risk Score", f"{df_raw['risk_score'].mean():.1f}")
+
+    cache_hits = int(sum(1 for result in raw if result.get("cache_hit")))
+    if cache_hits:
+        st.info(f"{cache_hits} IOC(s) were served from local cache during this run.")
 
     # Alert banner when high-risk IOCs are present
     high_risk_list = df[df["Risk Score"] >= 70]["IOC"].tolist()
@@ -150,11 +169,18 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
     st.subheader("Results")
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
-    st.download_button(
+    export_col1, export_col2 = st.columns(2)
+    export_col1.download_button(
         "⬇ Download CSV",
         view.to_csv(index=False).encode("utf-8"),
         "ioc_enrichment_results.csv",
         "text/csv",
+    )
+    export_col2.download_button(
+        "⬇ Download JSON",
+        json.dumps(raw, indent=2, ensure_ascii=False).encode("utf-8"),
+        "ioc_enrichment_results.json",
+        "application/json",
     )
 
     # ── Per-IOC detail cards ──────────────────────────────────────────────────
@@ -195,6 +221,9 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
                 )
             with hc2:
                 st.metric("Risk Score", f"{score} / 100")
+
+            if r.get("cache_hit"):
+                st.caption("Result source: local cache")
 
             st.progress(score / 100)
 
@@ -270,3 +299,8 @@ if "ioc_results" in st.session_state and st.session_state["ioc_results"]:
     # ── Raw JSON toggle ───────────────────────────────────────────────────────
     with st.expander("Show raw source JSON"):
         st.json(raw)
+
+history_rows = IOCEnricher().recent_history(limit=10)
+if history_rows:
+    with st.expander("Recent local enrichment history"):
+        st.dataframe(pd.DataFrame(history_rows), use_container_width=True, hide_index=True)
